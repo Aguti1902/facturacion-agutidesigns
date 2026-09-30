@@ -1,6 +1,6 @@
 import { send, authUser, withImap, readJson } from "../../lib/common.js";
 import { simpleParser } from "mailparser";
-import pdfParse from "pdf-parse/lib/pdf-parse.js";
+import { pdfText as readPdf } from "../../lib/pdftext.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { heuristicExtract } from "../../lib/heuristic.js";
 import { extractInvoiceLinks, downloadInvoice } from "../../lib/links.js";
@@ -37,7 +37,7 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return send(res, 405, { error: "Usa POST" });
   try {
     const { sb } = await authUser(req);
-    const { id, folder, uid, existingId, acct } = await readJson(req);
+    const { id, folder, uid, existingId, acct, files: onlyFiles } = await readJson(req);
     if (!/^imap-[0-9a-f]{20}$/.test(id || "") || !folder || !uid) return send(res, 400, { error: "Petición no válida" });
     const { data: existingFirst } = existingId && /^[\w.:-]{1,80}$/.test(existingId) ? await sb.from(TABLE).select("data").eq("collection", "expenses").eq("id", existingId).maybeSingle() : { data: null };
     const { data: already } = await sb.from(TABLE).select("id").eq("collection", "expenses").eq("id", id).maybeSingle();
@@ -51,7 +51,8 @@ export default async function handler(req, res) {
     const mail = await simpleParser(raw);
 
     // 1) Facturas adjuntas; 2) si no hay, facturas descargables desde los enlaces del correo
-    const files = (mail.attachments || []).filter(isPdf).map(a => ({ buf: a.content, name: a.filename || "factura.pdf", from: "adjunto" }));
+    const wanted = Array.isArray(onlyFiles) && onlyFiles.length ? new Set(onlyFiles) : null;
+    const files = (mail.attachments || []).filter(isPdf).filter(a => !wanted || wanted.has(a.filename || "documento.pdf") || wanted.has(a.filename)).map(a => ({ buf: a.content, name: a.filename || "factura.pdf", from: "adjunto" }));
     const linkNotes = [];
     if (!files.length) {
       const links = extractInvoiceLinks(mail.html || mail.textAsHtml || "", mail.text || "");
@@ -68,7 +69,7 @@ export default async function handler(req, res) {
 
     const build = async (file) => {
       let pdfText = "";
-      if (file) { try { pdfText = (await pdfParse(file.buf, { max: 3 })).text.slice(0, 14000); } catch {} }
+      if (file) { try { pdfText = (await readPdf(file.buf, 3)).slice(0, 14000); } catch {} }
       const f = await extract(profile, mail, pdfText);
       const all = `${pdfText}\n${mail.text || ""}`;
       const cur = String(f.currency || "EUR").toUpperCase();

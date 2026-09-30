@@ -1,7 +1,5 @@
 import { send, authUser, withImap, folders, accounts } from "../../lib/common.js";
 import crypto from "node:crypto";
-import { simpleParser } from "mailparser";
-import { extractInvoiceLinks } from "../../lib/links.js";
 
 const KEYWORDS = /(factura|invoice)/i;
 const WORDS = String(process.env.MAIL_KEYWORDS || "factura,invoice").split(",").map(s => s.trim()).filter(Boolean);
@@ -14,12 +12,12 @@ async function mailboxesFor(client, account) {
   return folders();
 }
 
-function pdfNames(node, out = []) {
+function pdfParts(node, out = []) {
   if (!node) return out;
   const type = `${node.type || ""}`.toLowerCase();
   const name = `${node.dispositionParameters?.filename || node.parameters?.name || ""}`;
-  if (type === "application/pdf" || /\.pdf$/i.test(name)) out.push(name || "factura.pdf");
-  (node.childNodes || []).forEach(c => pdfNames(c, out));
+  if (type === "application/pdf" || /\.pdf$/i.test(name) || (type === "application/octet-stream" && /\.pdf$/i.test(name))) out.push({ part: node.part || "1", name: name || "documento.pdf" });
+  (node.childNodes || []).forEach(c => pdfParts(c, out));
   return out;
 }
 
@@ -54,26 +52,15 @@ export default async function handler(req, res) {
             const sender = (env.from && env.from[0]) || {};
             const addr = (sender.address || "").toLowerCase();
             if (own.includes(addr)) continue;
-            const attachments = pdfNames(m.bodyStructure);
-            const pdf = attachments.length > 0;
+            const parts = pdfParts(m.bodyStructure);
             const subject = env.subject || "";
-            let links = [];
-            if (!pdf) {
-              try {
-                const part = await client.fetchOne(String(m.uid), { source: { start: 0, maxLength: 400000 } }, { uid: true });
-                const parsed = await simpleParser(part.source);
-                links = extractInvoiceLinks(parsed.html || parsed.textAsHtml || "", parsed.text || "");
-              } catch {}
-            }
-            if (!all && !pdf && !links.length) continue;
-
             const key = env.messageId || `${folder}:${client.mailbox.uidValidity}:${m.uid}`;
             out.push({
               id: "imap-" + crypto.createHash("sha1").update(key).digest("hex").slice(0, 20),
               folder, uid: m.uid,
               date: (env.date || m.internalDate || new Date()).toISOString(),
               sender: sender.name ? `${sender.name} <${addr}>` : addr, addr,
-              subject, hasPdf: pdf, attachments, links, acct, mailbox: account.user,
+              subject, hasPdf: parts.length > 0, parts, attachments: parts.map(p => p.name), acct, mailbox: account.user,
             });
           }
         } finally { lock.release(); }

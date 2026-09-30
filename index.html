@@ -575,38 +575,49 @@ function openExpense(ex){const isNew=!ex;let file=null;const L=$("#layer");
 
 /* ---------- Importar del correo ---------- */
 function sameMail(e,m){if(!e.mailAddr||!e.mailSubject)return false;if(e.mailAddr!==m.addr||e.mailSubject.trim()!==(m.subject||"").trim())return false;const a=new Date((e.mailDate||e.date)+(e.mailDate?"":"T12:00:00")),b=new Date(m.date);return Math.abs(a-b)<36*3600*1000;}
-function openImport(){const L=$("#layer");const st={y:S.y,q:S.q,all:false,list:null,sel:new Set(),busy:false,log:[],err:""};
-  const state=m=>{const ex=S.expenses.find(e=>e.id===m.id)||S.expenses.find(e=>sameMail(e,m));if(!ex)return "new";return ex.assetId||!m.hasPdf?"done":"complete";};
+function openImport(){const L=$("#layer");const st={y:S.y,q:S.q,list:null,verdict:{},sel:new Set(),busy:false,checking:false,done:0,log:[],err:"",showBad:false};
+  const state=m=>{const ex=S.expenses.find(e=>e.id===m.id)||S.expenses.find(e=>sameMail(e,m));if(!ex)return "new";return ex.assetId?"done":"complete";};
   const range=()=>{const m0=(st.q-1)*3+1;const a=`${st.y}-${String(m0).padStart(2,"0")}-01`;const b=st.q===4?`${st.y+1}-01-01`:`${st.y}-${String(m0+3).padStart(2,"0")}-01`;return [a,b];};
-  const draw=()=>{const items=st.list||[];
-   L.innerHTML=`<div class="drawer-bg"><div class="drawer" role="dialog" aria-label="Importar del correo">
-   <div class="head"><div><h1>Importar gastos del correo</h1><p class="sub">Busca facturas en ${esc(S.mailbox||"tu correo")}, guarda los PDF y lee los importes.</p></div><div class="row"><button class="btn ghost" id="x">Cerrar</button></div></div>
+  const good=()=>(st.list||[]).filter(m=>st.verdict[m.id]?.ok);const bad=()=>(st.list||[]).filter(m=>st.verdict[m.id]&&!st.verdict[m.id].ok);
+  const fileLabel=m=>{const v=st.verdict[m.id]||{};if(v.files&&v.files.length)return v.files.map(f=>`<span class="pill mut" title="PDF adjunto">PDF · ${esc(f.length>28?f.slice(0,26)+"…":f)}</span>`).join(" ");if(v.links&&v.links.length)return `<span class="pill acc" title="${esc(v.links[0].url)}">Enlace: ${esc((v.links[0].text||"descargar").slice(0,24))}</span>`;return "";};
+  const row=(m,ok)=>{const s=state(m);const lg=st.log.find(x=>x.id===m.id);const v=st.verdict[m.id]||{};
+    return `<tr><td style="width:30px">${ok?`<input type="checkbox" data-m="${esc(m.id)}" aria-label="Seleccionar" ${st.sel.has(m.id)?"checked":""} ${s==="done"||st.busy?"disabled":""} style="width:auto">`:""}</td>
+     <td class="num small">${fdate(m.date)}</td><td><b>${esc(m.subject||"(sin asunto)")}</b><span class="s">${esc(m.sender)}${v.total?" · "+eur(v.total):""}</span></td>
+     <td style="min-width:170px">${ok?fileLabel(m):`<span class="small muted">${esc(v.reason||"")}</span>`}</td>
+     <td class="r" style="white-space:nowrap">${lg?`<span class="pill ${lg.cls}">${esc(lg.msg)}</span>`:ok?(s==="done"?`<span class="pill ok">Ya importada</span>`:s==="complete"?`<span class="pill acc">Añadir PDF</span>`:""):""}</td></tr>`;};
+  const draw=()=>{const g=good(),b=bad();const total=(st.list||[]).length;
+   L.innerHTML=`<div class="drawer-bg"><div class="drawer" role="dialog" aria-label="Importar facturas del correo">
+   <div class="head"><div><h1>Importar facturas del correo</h1><p class="sub">Reviso uno a uno los correos de ${esc(S.mailbox||"tu buzón")} y solo te muestro las facturas de gastos.</p></div><div class="row"><button class="btn ghost" id="x">Cerrar</button></div></div>
    <div class="panel pad" style="display:flex;flex-direction:column;gap:12px"><fieldset>
      <div class="f w3"><label for="m_q">Trimestre</label><select id="m_q">${[1,2,3,4].map(q=>`<option value="${q}" ${st.q===q?"selected":""}>T${q}</option>`).join("")}</select></div>
-     <div class="f w3"><label for="m_y">Año</label><input id="m_y" class="num" type="number" value="${st.y}"></div>
-     <div class="f w6" style="justify-content:flex-end"><label class="chk"><input type="checkbox" id="m_all" ${st.all?"checked":""}>Mostrar todos los correos, no solo los que contienen «factura» o «invoice»</label></div></fieldset>
-    <div class="row"><button class="btn primary" id="go" ${st.busy?"disabled":""}>${st.busy&&!st.list?"Buscando…":st.list?"Buscar de nuevo":"Buscar en el correo"}</button></div>
+     <div class="f w3"><label for="m_y">Año</label><input id="m_y" class="num" type="number" value="${st.y}"></div></fieldset>
+    <div class="row"><button class="btn primary" id="go" ${st.busy||st.checking?"disabled":""}>${st.list?"Buscar de nuevo":"Buscar facturas"}</button>${st.checking?`<span class="small muted">Revisando correo ${st.done} de ${total}…</span>`:st.list?`<span class="small muted">${total} correos revisados · ${g.length} con factura de gasto · ${b.length} descartados</span>`:""}</div>
     ${st.err?`<div class="alert warn"><div>${esc(st.err)}</div></div>`:""}</div>
-   ${st.list?`<div class="panel"><div class="card-h"><h2>${items.filter(m=>m.hasPdf||(m.links||[]).length).length} correo${items.length!==1?"s":""} con factura</h2><div class="row"><button class="btn ghost" id="all">Marcar todos</button><button class="btn primary" id="imp" ${st.busy||!st.sel.size?"disabled":""}>Importar ${st.sel.size||""}</button></div></div>
-    ${items.length?`<div class="tw"><table><tbody>${items.map(m=>{const s=state(m);const lg=st.log.find(x=>x.id===m.id);return `<tr><td style="width:30px"><input type="checkbox" data-m="${esc(m.id)}" aria-label="Seleccionar" ${st.sel.has(m.id)?"checked":""} ${s==="done"||st.busy?"disabled":""} style="width:auto"></td>
-     <td class="num small" style="white-space:nowrap">${fdate(m.date)}</td><td><b>${esc(m.subject||"(sin asunto)")}</b><span class="s">${esc(m.sender)}${m.mailbox?" · en "+esc(m.mailbox):""}</span></td>
-     <td style="min-width:180px">${(m.attachments||[]).length?(m.attachments.map(a=>`<span class="pill mut" title="PDF adjunto">PDF · ${esc(a.length>28?a.slice(0,26)+"…":a)}</span>`).join(" ")):(m.links||[]).length?`<span class="pill acc" title="${esc(m.links[0].url)}">Enlace: ${esc((m.links[0].text||new URL(m.links[0].url).hostname).slice(0,26))}</span>`:`<span class="pill mut">Sin factura</span>`}</td>
-     <td class="r" style="white-space:nowrap">${lg?`<span class="pill ${lg.cls}">${esc(lg.msg)}</span>`:s==="done"?`<span class="pill ok">Ya importado</span>`:s==="complete"?`<span class="pill acc">Añadir PDF</span>`:""}</td></tr>`;}).join("")}</tbody></table></div>`
-    :`<div class="empty"><b>No hay facturas en ese trimestre</b>Ningún correo con «factura» o «invoice» trae un PDF adjunto o un enlace de descarga.</div>`}</div>`:""}
-   <div class="tip">De cada correo se guarda la factura, no el correo: los PDF adjuntos y, si no hay, el PDF que se descarga desde su enlace (Stripe, Supabase, etc.). Si el enlace pide iniciar sesión (Google Ads), el gasto se registra con el enlace para que descargues tú el PDF. Revisa siempre los marcados como «Revisar».</div></div></div>`;bind();};
-  const bind=()=>{$("#x").onclick=closeLayer;$("#m_q").onchange=e=>{st.q=+e.target.value;draw();};$("#m_y").onchange=e=>{st.y=+e.target.value||st.y;draw();};$("#m_all").onchange=e=>{st.all=e.target.checked;draw();};$("#go").onclick=search;
+   ${st.list?`<div class="panel"><div class="card-h"><h2>${g.length} factura${g.length!==1?"s":""} de gasto</h2><div class="row"><button class="btn ghost" id="all">Marcar todas</button><button class="btn primary" id="imp" ${st.busy||st.checking||!st.sel.size?"disabled":""}>Importar ${st.sel.size||""}</button></div></div>
+     ${g.length?`<div class="tw"><table><tbody>${g.map(m=>row(m,true)).join("")}</tbody></table></div>`:`<div class="empty"><b>${st.checking?"Buscando facturas…":"No hay facturas de gasto en ese trimestre"}</b>${st.checking?"Van apareciendo aquí según las encuentro.":""}</div>`}</div>
+    ${b.length?`<div class="panel"><div class="card-h"><h2>${b.length} correo${b.length!==1?"s":""} descartado${b.length!==1?"s":""}</h2><button class="btn ghost" id="tog">${st.showBad?"Ocultar":"Ver por qué"}</button></div>${st.showBad?`<div class="tw"><table><tbody>${b.map(m=>row(m,false)).join("")}</tbody></table></div>`:""}</div>`:""}`:""}
+   <div class="tip">Descarto las facturas que emites tú, presupuestos, contratos, avisos de pago y correos que solo mencionan una factura. De cada factura se guarda el PDF (adjunto o descargado desde su enlace) y se leen los importes; revisa siempre los marcados como «Revisar».</div></div></div>`;bind();};
+  const bind=()=>{$("#x").onclick=()=>{st.cancel=true;closeLayer();};$("#m_q").onchange=e=>{st.q=+e.target.value;draw();};$("#m_y").onchange=e=>{st.y=+e.target.value||st.y;draw();};$("#go").onclick=search;
    $$("[data-m]",L).forEach(cb=>cb.onchange=()=>{cb.checked?st.sel.add(cb.dataset.m):st.sel.delete(cb.dataset.m);draw();});
-   const a=$("#all");if(a)a.onclick=()=>{st.list.forEach(m=>{if(state(m)!=="done")st.sel.add(m.id);});draw();};const i=$("#imp");if(i)i.onclick=run;};
-  async function search(){st.busy=true;st.err="";st.list=null;st.sel.clear();draw();const [a,b]=range();
-    try{const r=await api(`/api/mail/search?from=${a}&to=${b}${st.all?"&all=1":""}`);st.list=r.items;if(r.warnings&&r.warnings.length)st.err=r.warnings.join(" ");r.items.forEach(m=>{if(state(m)!=="done"&&(m.hasPdf||(m.links||[]).length))st.sel.add(m.id);});}
-    catch(e){st.err=e.code==="imap_not_configured"?"Falta conectar el correo: añade IMAP_PASSWORD (contraseña de aplicación de Google) en las variables de Vercel y vuelve a publicar.":e.message;}st.busy=false;draw();}
+   const a=$("#all");if(a)a.onclick=()=>{good().forEach(m=>{if(state(m)!=="done")st.sel.add(m.id);});draw();};const i=$("#imp");if(i)i.onclick=run;const t=$("#tog");if(t)t.onclick=()=>{st.showBad=!st.showBad;draw();};};
+  async function search(){st.busy=true;st.err="";st.list=null;st.verdict={};st.sel.clear();st.done=0;draw();const [a,b]=range();
+    try{const r=await api(`/api/mail/search?from=${a}&to=${b}`);st.list=r.items;if(r.warnings&&r.warnings.length)st.err=r.warnings.join(" ");}
+    catch(e){st.err=e.code==="imap_not_configured"?"Falta conectar el correo en Vercel (IMAP_PASSWORD).":e.message;st.busy=false;draw();return;}
+    st.busy=false;st.checking=true;draw();
+    const groups={};st.list.forEach(m=>{(groups[m.acct||0]=groups[m.acct||0]||[]).push(m);});
+    for(const acct in groups){const arr=groups[acct];for(let k=0;k<arr.length;k+=6){if(st.cancel)return;const batch=arr.slice(k,k+6);
+      try{const r=await api("/api/mail/classify",{method:"POST",body:JSON.stringify({items:batch.map(m=>({id:m.id,folder:m.folder,uid:m.uid,acct:m.acct||0,parts:m.parts||[],subject:m.subject,addr:m.addr}))})});
+        Object.assign(st.verdict,r.results);batch.forEach(m=>{if(r.results[m.id]?.ok&&state(m)!=="done")st.sel.add(m.id);});}
+      catch(e){batch.forEach(m=>st.verdict[m.id]={ok:false,reason:"No se pudo revisar: "+(e.message||"error")});}
+      st.done=Math.min(st.list.length,st.done+batch.length);draw();}}
+    st.checking=false;draw();}
   async function run(){st.busy=true;const ids=[...st.sel];st.log=[];draw();let ok=0,fail=0,skip=0;
-    for(const id of ids){const m=st.list.find(x=>x.id===id);const ex=S.expenses.find(e=>e.id===m.id)||S.expenses.find(e=>sameMail(e,m));const setLog=(msg,cls)=>{st.log=st.log.filter(x=>x.id!==id).concat([{id,msg,cls}]);draw();};setLog("Leyendo…","mut");
-     try{const r=await api("/api/mail/import",{method:"POST",body:JSON.stringify({id,folder:m.folder,uid:m.uid,acct:m.acct||0,existingId:ex?ex.id:null})});
+    for(const id of ids){const m=st.list.find(x=>x.id===id);const v=st.verdict[id]||{};const ex=S.expenses.find(e=>e.id===m.id)||S.expenses.find(e=>sameMail(e,m));const setLog=(msg,cls)=>{st.log=st.log.filter(x=>x.id!==id).concat([{id,msg,cls}]);draw();};setLog("Descargando…","mut");
+     try{const r=await api("/api/mail/import",{method:"POST",body:JSON.stringify({id,folder:m.folder,uid:m.uid,acct:m.acct||0,existingId:ex?ex.id:null,files:v.files||[]})});
       if(r.status==="skipped"){skip++;setLog("No es una factura","mut");}
-      else if(r.status==="duplicate"){setLog("Ya importado","ok");}
-      else if(r.status==="nofile"){fail++;const l=(r.links||[])[0];setLog(l?("No se pudo descargar: "+l.reason):"Sin PDF ni enlace de descarga","bad");}
-      else if(r.gated){ok++;st.sel.delete(id);setLog("Registrado · descarga el PDF (pide iniciar sesión)","warn");}
+      else if(r.status==="duplicate"){setLog("Ya importada","ok");}
+      else if(r.status==="nofile"){fail++;const l=(r.links||[])[0];setLog(l?("No se pudo descargar: "+l.reason):"Sin PDF descargable","bad");}
+      else if(r.gated){ok++;st.sel.delete(id);setLog("Registrada · descarga el PDF (pide iniciar sesión)","warn");}
       else{const n=(r.files||[]).length;ok+=n;st.sel.delete(id);const fromLink=(r.files||[]).some(f=>f.from==="enlace");setLog(n===1?(r.files[0].completed?"PDF añadido al gasto":fromLink?"Factura descargada del enlace":"Factura guardada"):n+" facturas guardadas","ok");}}
      catch(e){fail++;setLog((e.message||"Error").slice(0,60),"bad");}}
     st.busy=false;draw();toast(`${ok} factura${ok!==1?"s":""} guardada${ok!==1?"s":""}${skip?` · ${skip} descartada${skip!==1?"s":""}`:""}${fail?` · ${fail} sin descargar`:""}`);}
