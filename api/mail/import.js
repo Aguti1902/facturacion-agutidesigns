@@ -36,7 +36,7 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return send(res, 405, { error: "Usa POST" });
   try {
     const { sb } = await authUser(req);
-    const { id, folder, uid, existingId } = await readJson(req);
+    const { id, folder, uid, existingId, acct } = await readJson(req);
     if (!/^imap-[0-9a-f]{20}$/.test(id || "") || !folder || !uid) return send(res, 400, { error: "Petición no válida" });
     const targetId = existingId && /^[\w.:-]{1,80}$/.test(existingId) ? existingId : id;
     const { data: existing } = await sb.from(TABLE).select("data").eq("collection", "expenses").eq("id", targetId).maybeSingle();
@@ -45,7 +45,7 @@ export default async function handler(req, res) {
     const raw = await withImap(async client => {
       const lock = await client.getMailboxLock(folder);
       try { const m = await client.fetchOne(String(uid), { source: true }, { uid: true }); return m && m.source; } finally { lock.release(); }
-    });
+    }, +acct || 0);
     if (!raw) return send(res, 404, { error: "No se encontró el correo" });
     const mail = await simpleParser(raw);
     const pdf = (mail.attachments || []).find(isPdf);

@@ -1,4 +1,4 @@
-import { send, authUser, withImap, folders } from "../../lib/common.js";
+import { send, authUser, withImap, folders, accounts } from "../../lib/common.js";
 import crypto from "node:crypto";
 
 const KEYWORDS = /(factura|invoice|recibo|receipt|billing|facturaci[oó]n|payment|pago|justificante|statement)/i;
@@ -19,8 +19,10 @@ export default async function handler(req, res) {
     const to = url.searchParams.get("to");     // AAAA-MM-DD (exclusivo)
     const all = url.searchParams.get("all") === "1";
     if (!/^\d{4}-\d{2}-\d{2}$/.test(from || "") || !/^\d{4}-\d{2}-\d{2}$/.test(to || "")) return send(res, 400, { error: "Fechas no válidas" });
-    const own = (process.env.IMAP_USER || "").toLowerCase();
-    const items = await withImap(async client => {
+    const own = accounts().map(a => a.user.toLowerCase());
+    const items = []; const errors = [];
+    for (let acct = 0; acct < Math.max(1, accounts().length); acct++) {
+    try { items.push(...await withImap(async (client, account) => {
       const out = [];
       for (const folder of folders()) {
         let lock;
@@ -32,7 +34,7 @@ export default async function handler(req, res) {
             const env = m.envelope || {};
             const sender = (env.from && env.from[0]) || {};
             const addr = (sender.address || "").toLowerCase();
-            if (own && addr === own) continue;
+            if (own.includes(addr)) continue;
             const pdf = hasPdf(m.bodyStructure);
             const subject = env.subject || "";
             if (!all && !pdf && !KEYWORDS.test(subject)) continue;
@@ -42,15 +44,17 @@ export default async function handler(req, res) {
               folder, uid: m.uid,
               date: (env.date || m.internalDate || new Date()).toISOString(),
               sender: sender.name ? `${sender.name} <${addr}>` : addr, addr,
-              subject, hasPdf: pdf,
+              subject, hasPdf: pdf, acct, mailbox: account.user,
             });
           }
         } finally { lock.release(); }
       }
       return out;
-    });
+    }, acct)); } catch (e) { if (e.code === "imap_not_configured") throw e; errors.push(e.message); }
+    }
+    if (!items.length && errors.length) throw Object.assign(new Error(errors.join(" ")), { status: 502, code: "imap_login" });
     items.sort((a, b) => b.date.localeCompare(a.date));
-    send(res, 200, { items });
+    send(res, 200, { items, warnings: errors });
   } catch (e) {
     send(res, e.status || 500, { error: e.message || "Error", code: e.code });
   }
