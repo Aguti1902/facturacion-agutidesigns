@@ -584,7 +584,7 @@ function openImport(){const L=$("#layer");const st={y:S.y,q:S.q,all:false,list:n
    <div class="panel pad" style="display:flex;flex-direction:column;gap:12px"><fieldset>
      <div class="f w3"><label for="m_q">Trimestre</label><select id="m_q">${[1,2,3,4].map(q=>`<option value="${q}" ${st.q===q?"selected":""}>T${q}</option>`).join("")}</select></div>
      <div class="f w3"><label for="m_y">Año</label><input id="m_y" class="num" type="number" value="${st.y}"></div>
-     <div class="f w6" style="justify-content:flex-end"><label class="chk"><input type="checkbox" id="m_all" ${st.all?"checked":""}>Mostrar todos los correos, no solo los que parecen facturas</label></div></fieldset>
+     <div class="f w6" style="justify-content:flex-end"><label class="chk"><input type="checkbox" id="m_all" ${st.all?"checked":""}>Mostrar todos los correos, no solo los que contienen «factura» o «invoice»</label></div></fieldset>
     <div class="row"><button class="btn primary" id="go" ${st.busy?"disabled":""}>${st.busy&&!st.list?"Buscando…":st.list?"Buscar de nuevo":"Buscar en el correo"}</button></div>
     ${st.err?`<div class="alert warn"><div>${esc(st.err)}</div></div>`:""}</div>
    ${st.list?`<div class="panel"><div class="card-h"><h2>${items.length} correo${items.length!==1?"s":""}</h2><div class="row"><button class="btn ghost" id="all">Marcar todos</button><button class="btn primary" id="imp" ${st.busy||!st.sel.size?"disabled":""}>Importar ${st.sel.size||""}</button></div></div>

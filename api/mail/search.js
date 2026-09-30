@@ -1,7 +1,16 @@
 import { send, authUser, withImap, folders, accounts } from "../../lib/common.js";
 import crypto from "node:crypto";
 
-const KEYWORDS = /(factura|invoice|recibo|receipt|billing|facturaci[oó]n|payment|pago|justificante|statement)/i;
+const KEYWORDS = /(factura|invoice)/i;
+const WORDS = String(process.env.MAIL_KEYWORDS || "factura,invoice").split(",").map(s => s.trim()).filter(Boolean);
+const gdate = d => d.replace(/-/g, "/");
+
+async function mailboxesFor(client, account) {
+  if (/gmail\.com$/i.test(account.host)) {
+    try { const list = await client.list(); const allBox = list.find(b => b.specialUse === "\\All"); if (allBox) return [allBox.path]; } catch {}
+  }
+  return folders();
+}
 
 function hasPdf(node) {
   if (!node) return false;
@@ -24,11 +33,16 @@ export default async function handler(req, res) {
     for (let acct = 0; acct < Math.max(1, accounts().length); acct++) {
     try { items.push(...await withImap(async (client, account) => {
       const out = [];
-      for (const folder of folders()) {
+      for (const folder of await mailboxesFor(client, account)) {
         let lock;
         try { lock = await client.getMailboxLock(folder); } catch { continue; }
         try {
-          const uids = await client.search({ since: new Date(from + "T00:00:00Z"), before: new Date(to + "T00:00:00Z") }, { uid: true });
+          const range = { since: new Date(from + "T00:00:00Z"), before: new Date(to + "T00:00:00Z") };
+          const words = WORDS.map(w => `"${w}"`).join(" OR ");
+          let uids;
+          if (all) uids = await client.search(range, { uid: true });
+          else if (/gmail\.com$/i.test(account.host)) uids = await client.search({ gmraw: `(${words}) after:${gdate(from)} before:${gdate(to)}` }, { uid: true });
+          else uids = await client.search({ ...range, or: WORDS.flatMap(w => [{ subject: w }, { body: w }]) }, { uid: true });
           if (!uids || !uids.length) continue;
           for await (const m of client.fetch(uids.slice(-400), { envelope: true, bodyStructure: true, internalDate: true }, { uid: true })) {
             const env = m.envelope || {};
@@ -37,7 +51,7 @@ export default async function handler(req, res) {
             if (own.includes(addr)) continue;
             const pdf = hasPdf(m.bodyStructure);
             const subject = env.subject || "";
-            if (!all && !pdf && !KEYWORDS.test(subject)) continue;
+
             const key = env.messageId || `${folder}:${client.mailbox.uidValidity}:${m.uid}`;
             out.push({
               id: "imap-" + crypto.createHash("sha1").update(key).digest("hex").slice(0, 20),
