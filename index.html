@@ -547,7 +547,7 @@ function openExpense(ex){const isNew=!ex;let file=null;const L=$("#layer");
     <div class="f w3"><label for="e_ded">% deducible</label><select id="e_ded">${[100,50,30,0].map(v=>`<option value="${v}" ${dedPct(d)===v?"selected":""}>${v} %</option>`).join("")}</select></div>
     <div class="f w3"><label class="chk" style="margin-top:22px"><input type="checkbox" id="e_paid" ${d.paid!==false?"checked":""}>Pagado</label></div>
     ${d.currency&&d.currency!=="EUR"?`<div class="f w12 tip">Factura en ${esc(d.currency)} (${esc(d.originalAmount)}). Pon como base el importe en euros que te cobró el banco.</div>`:""}
-    ${d.gmailUrl?`<div class="f w12"><a class="btn sm" href="${esc(d.gmailUrl)}" target="_blank" rel="noopener">Ver el correo original ↗</a></div>`:""}
+    <div class="f w12 row">${d.invoiceUrl?`<a class="btn sm primary" href="${esc(d.invoiceUrl)}" target="_blank" rel="noopener">Abrir enlace de la factura ↗</a>`:""}${d.gmailUrl?`<a class="btn sm" href="${esc(d.gmailUrl)}" target="_blank" rel="noopener">Ver el correo original ↗</a>`:""}</div>
    </fieldset></div>
    <div class="panel pad" style="display:flex;flex-direction:column;gap:10px"><h2>Factura del proveedor</h2>
     <label class="drop" id="drop" for="e_file"><input type="file" id="e_file" accept="application/pdf,image/*" hidden>${file?`<b>${esc(file.name)}</b> · se subirá al guardar`:d.assetId?`<b>${esc(d.assetName||"Factura adjunta")}</b> · pulsa para sustituirla`:`<b>Arrastra el PDF aquí</b> o pulsa para elegirlo`}</label>
@@ -587,24 +587,29 @@ function openImport(){const L=$("#layer");const st={y:S.y,q:S.q,all:false,list:n
      <div class="f w6" style="justify-content:flex-end"><label class="chk"><input type="checkbox" id="m_all" ${st.all?"checked":""}>Mostrar todos los correos, no solo los que contienen «factura» o «invoice»</label></div></fieldset>
     <div class="row"><button class="btn primary" id="go" ${st.busy?"disabled":""}>${st.busy&&!st.list?"Buscando…":st.list?"Buscar de nuevo":"Buscar en el correo"}</button></div>
     ${st.err?`<div class="alert warn"><div>${esc(st.err)}</div></div>`:""}</div>
-   ${st.list?`<div class="panel"><div class="card-h"><h2>${items.length} correo${items.length!==1?"s":""}</h2><div class="row"><button class="btn ghost" id="all">Marcar todos</button><button class="btn primary" id="imp" ${st.busy||!st.sel.size?"disabled":""}>Importar ${st.sel.size||""}</button></div></div>
+   ${st.list?`<div class="panel"><div class="card-h"><h2>${items.filter(m=>m.hasPdf||(m.links||[]).length).length} correo${items.length!==1?"s":""} con factura</h2><div class="row"><button class="btn ghost" id="all">Marcar todos</button><button class="btn primary" id="imp" ${st.busy||!st.sel.size?"disabled":""}>Importar ${st.sel.size||""}</button></div></div>
     ${items.length?`<div class="tw"><table><tbody>${items.map(m=>{const s=state(m);const lg=st.log.find(x=>x.id===m.id);return `<tr><td style="width:30px"><input type="checkbox" data-m="${esc(m.id)}" aria-label="Seleccionar" ${st.sel.has(m.id)?"checked":""} ${s==="done"||st.busy?"disabled":""} style="width:auto"></td>
      <td class="num small" style="white-space:nowrap">${fdate(m.date)}</td><td><b>${esc(m.subject||"(sin asunto)")}</b><span class="s">${esc(m.sender)}${m.mailbox?" · en "+esc(m.mailbox):""}</span></td>
-     <td class="r" style="white-space:nowrap">${m.hasPdf?`<span class="pill mut">PDF</span> `:""}${lg?`<span class="pill ${lg.cls}">${esc(lg.msg)}</span>`:s==="done"?`<span class="pill ok">Ya importado</span>`:s==="complete"?`<span class="pill acc">Añadir PDF</span>`:""}</td></tr>`;}).join("")}</tbody></table></div>`
-    :`<div class="empty"><b>No hay correos con facturas en ese trimestre</b></div>`}</div>`:""}
-   <div class="tip">Si el correo trae el PDF, se guarda con el gasto y se leen los importes; si la factura solo está en un enlace (Google Ads, por ejemplo), el gasto queda como «Falta PDF». Revisa siempre los marcados como «Revisar».</div></div></div>`;bind();};
+     <td style="min-width:180px">${(m.attachments||[]).length?(m.attachments.map(a=>`<span class="pill mut" title="PDF adjunto">PDF · ${esc(a.length>28?a.slice(0,26)+"…":a)}</span>`).join(" ")):(m.links||[]).length?`<span class="pill acc" title="${esc(m.links[0].url)}">Enlace: ${esc((m.links[0].text||new URL(m.links[0].url).hostname).slice(0,26))}</span>`:`<span class="pill mut">Sin factura</span>`}</td>
+     <td class="r" style="white-space:nowrap">${lg?`<span class="pill ${lg.cls}">${esc(lg.msg)}</span>`:s==="done"?`<span class="pill ok">Ya importado</span>`:s==="complete"?`<span class="pill acc">Añadir PDF</span>`:""}</td></tr>`;}).join("")}</tbody></table></div>`
+    :`<div class="empty"><b>No hay facturas en ese trimestre</b>Ningún correo con «factura» o «invoice» trae un PDF adjunto o un enlace de descarga.</div>`}</div>`:""}
+   <div class="tip">De cada correo se guarda la factura, no el correo: los PDF adjuntos y, si no hay, el PDF que se descarga desde su enlace (Stripe, Supabase, etc.). Si el enlace pide iniciar sesión (Google Ads), el gasto se registra con el enlace para que descargues tú el PDF. Revisa siempre los marcados como «Revisar».</div></div></div>`;bind();};
   const bind=()=>{$("#x").onclick=closeLayer;$("#m_q").onchange=e=>{st.q=+e.target.value;draw();};$("#m_y").onchange=e=>{st.y=+e.target.value||st.y;draw();};$("#m_all").onchange=e=>{st.all=e.target.checked;draw();};$("#go").onclick=search;
    $$("[data-m]",L).forEach(cb=>cb.onchange=()=>{cb.checked?st.sel.add(cb.dataset.m):st.sel.delete(cb.dataset.m);draw();});
    const a=$("#all");if(a)a.onclick=()=>{st.list.forEach(m=>{if(state(m)!=="done")st.sel.add(m.id);});draw();};const i=$("#imp");if(i)i.onclick=run;};
   async function search(){st.busy=true;st.err="";st.list=null;st.sel.clear();draw();const [a,b]=range();
-    try{const r=await api(`/api/mail/search?from=${a}&to=${b}${st.all?"&all=1":""}`);st.list=r.items;if(r.warnings&&r.warnings.length)st.err=r.warnings.join(" ");r.items.forEach(m=>{if(state(m)!=="done"&&(m.hasPdf||!st.all))st.sel.add(m.id);});}
+    try{const r=await api(`/api/mail/search?from=${a}&to=${b}${st.all?"&all=1":""}`);st.list=r.items;if(r.warnings&&r.warnings.length)st.err=r.warnings.join(" ");r.items.forEach(m=>{if(state(m)!=="done"&&(m.hasPdf||(m.links||[]).length))st.sel.add(m.id);});}
     catch(e){st.err=e.code==="imap_not_configured"?"Falta conectar el correo: añade IMAP_PASSWORD (contraseña de aplicación de Google) en las variables de Vercel y vuelve a publicar.":e.message;}st.busy=false;draw();}
   async function run(){st.busy=true;const ids=[...st.sel];st.log=[];draw();let ok=0,fail=0,skip=0;
     for(const id of ids){const m=st.list.find(x=>x.id===id);const ex=S.expenses.find(e=>e.id===m.id)||S.expenses.find(e=>sameMail(e,m));const setLog=(msg,cls)=>{st.log=st.log.filter(x=>x.id!==id).concat([{id,msg,cls}]);draw();};setLog("Leyendo…","mut");
      try{const r=await api("/api/mail/import",{method:"POST",body:JSON.stringify({id,folder:m.folder,uid:m.uid,acct:m.acct||0,existingId:ex?ex.id:null})});
-      if(r.status==="skipped"){skip++;setLog("No es una factura","mut");}else{ok++;st.sel.delete(id);setLog(r.hasPdf?(r.completed?"PDF añadido":"Importado · revisar"):"Importado · sin PDF",r.hasPdf?"ok":"warn");}}
+      if(r.status==="skipped"){skip++;setLog("No es una factura","mut");}
+      else if(r.status==="duplicate"){setLog("Ya importado","ok");}
+      else if(r.status==="nofile"){fail++;const l=(r.links||[])[0];setLog(l?("No se pudo descargar: "+l.reason):"Sin PDF ni enlace de descarga","bad");}
+      else if(r.gated){ok++;st.sel.delete(id);setLog("Registrado · descarga el PDF (pide iniciar sesión)","warn");}
+      else{const n=(r.files||[]).length;ok+=n;st.sel.delete(id);const fromLink=(r.files||[]).some(f=>f.from==="enlace");setLog(n===1?(r.files[0].completed?"PDF añadido al gasto":fromLink?"Factura descargada del enlace":"Factura guardada"):n+" facturas guardadas","ok");}}
      catch(e){fail++;setLog((e.message||"Error").slice(0,60),"bad");}}
-    st.busy=false;draw();toast(`${ok} importado${ok!==1?"s":""}${skip?` · ${skip} descartado${skip!==1?"s":""}`:""}${fail?` · ${fail} con error`:""}`);}
+    st.busy=false;draw();toast(`${ok} factura${ok!==1?"s":""} guardada${ok!==1?"s":""}${skip?` · ${skip} descartada${skip!==1?"s":""}`:""}${fail?` · ${fail} sin descargar`:""}`);}
   draw();}
 
 /* ---------- Contactos ---------- */

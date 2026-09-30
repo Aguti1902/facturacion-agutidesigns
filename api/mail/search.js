@@ -1,5 +1,7 @@
 import { send, authUser, withImap, folders, accounts } from "../../lib/common.js";
 import crypto from "node:crypto";
+import { simpleParser } from "mailparser";
+import { extractInvoiceLinks } from "../../lib/links.js";
 
 const KEYWORDS = /(factura|invoice)/i;
 const WORDS = String(process.env.MAIL_KEYWORDS || "factura,invoice").split(",").map(s => s.trim()).filter(Boolean);
@@ -12,12 +14,13 @@ async function mailboxesFor(client, account) {
   return folders();
 }
 
-function hasPdf(node) {
-  if (!node) return false;
+function pdfNames(node, out = []) {
+  if (!node) return out;
   const type = `${node.type || ""}`.toLowerCase();
-  const name = `${node.dispositionParameters?.filename || node.parameters?.name || ""}`.toLowerCase();
-  if (type === "application/pdf" || name.endsWith(".pdf")) return true;
-  return (node.childNodes || []).some(hasPdf);
+  const name = `${node.dispositionParameters?.filename || node.parameters?.name || ""}`;
+  if (type === "application/pdf" || /\.pdf$/i.test(name)) out.push(name || "factura.pdf");
+  (node.childNodes || []).forEach(c => pdfNames(c, out));
+  return out;
 }
 
 export default async function handler(req, res) {
@@ -44,13 +47,25 @@ export default async function handler(req, res) {
           else if (/gmail\.com$/i.test(account.host)) uids = await client.search({ gmraw: `(${words}) after:${gdate(from)} before:${gdate(to)}` }, { uid: true });
           else uids = await client.search({ ...range, or: WORDS.flatMap(w => [{ subject: w }, { body: w }]) }, { uid: true });
           if (!uids || !uids.length) continue;
-          for await (const m of client.fetch(uids.slice(-400), { envelope: true, bodyStructure: true, internalDate: true }, { uid: true })) {
+          const msgs = [];
+          for await (const m of client.fetch(uids.slice(-300), { envelope: true, bodyStructure: true, internalDate: true }, { uid: true })) msgs.push(m);
+          for (const m of msgs) {
             const env = m.envelope || {};
             const sender = (env.from && env.from[0]) || {};
             const addr = (sender.address || "").toLowerCase();
             if (own.includes(addr)) continue;
-            const pdf = hasPdf(m.bodyStructure);
+            const attachments = pdfNames(m.bodyStructure);
+            const pdf = attachments.length > 0;
             const subject = env.subject || "";
+            let links = [];
+            if (!pdf) {
+              try {
+                const part = await client.fetchOne(String(m.uid), { source: { start: 0, maxLength: 400000 } }, { uid: true });
+                const parsed = await simpleParser(part.source);
+                links = extractInvoiceLinks(parsed.html || parsed.textAsHtml || "", parsed.text || "");
+              } catch {}
+            }
+            if (!all && !pdf && !links.length) continue;
 
             const key = env.messageId || `${folder}:${client.mailbox.uidValidity}:${m.uid}`;
             out.push({
@@ -58,7 +73,7 @@ export default async function handler(req, res) {
               folder, uid: m.uid,
               date: (env.date || m.internalDate || new Date()).toISOString(),
               sender: sender.name ? `${sender.name} <${addr}>` : addr, addr,
-              subject, hasPdf: pdf, acct, mailbox: account.user,
+              subject, hasPdf: pdf, attachments, links, acct, mailbox: account.user,
             });
           }
         } finally { lock.release(); }
