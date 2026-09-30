@@ -1,7 +1,7 @@
 import { send, authUser, withImap, readJson } from "../../lib/common.js";
 import { simpleParser } from "mailparser";
 import { pdfText as readPdf } from "../../lib/pdftext.js";
-import Anthropic from "@anthropic-ai/sdk";
+import { hasAI, aiExtract } from "../../lib/ai.js";
 import { heuristicExtract } from "../../lib/heuristic.js";
 import { extractInvoiceLinks, downloadInvoice } from "../../lib/links.js";
 
@@ -11,26 +11,13 @@ const EU = /\b(IE|DE|FR|NL|LU|BE|IT|PT|AT|SE|DK|FI|PL|CZ|EE|LT|LV|HU|SK|SI|HR|RO
 const r2 = n => Math.round((+n || 0) * 100) / 100;
 const isPdf = a => a.contentType === "application/pdf" || /\.pdf$/i.test(a.filename || "") || (a.content && a.content.slice(0, 4).toString() === "%PDF");
 
-async function extract(profile, mail, pdfText) {
+async function extract(profile, mail, pdfText, pdfFile) {
   const fromName = mail.from?.value?.[0]?.name || mail.from?.value?.[0]?.address || "";
   const dateIso = (mail.date || new Date()).toISOString().slice(0, 10);
   const basic = () => ({ ...heuristicExtract({ text: pdfText || mail.text || "", subject: mail.subject || "", fromName, dateIso, companyCif: profile.nif || "" }), noAi: true });
-  if (!process.env.ANTHROPIC_API_KEY) return basic();
-  try {
-    const client = new Anthropic();
-    const prompt = `Extrae los datos de una factura RECIBIDA por el autónomo ${profile.name || ""} (NIF ${profile.nif || "-"}). Devuelve SOLO JSON con: supplier, cif, number, date (AAAA-MM-DD), concept (máx. 70 caracteres), category (una de: ${CATS.join(" | ")}), currency, base, vat_rate, vat_amount, total, irpf_rate (retención si la factura la aplica, si no 0), region ("ES" | "UE" | "EXT" según el país del emisor), reverse_charge (true si el emisor no es español y no cobra IVA español), is_invoice (false si no es una factura o recibo de gasto), confidence ("alta"|"media"|"baja").
-
-CORREO
-De: ${mail.from?.text || ""}
-Asunto: ${mail.subject || ""}
-${(mail.text || "").slice(0, 5000)}
-
-TEXTO DEL PDF
-${pdfText || "(sin PDF)"}`;
-    const r = await client.messages.create({ model: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001", max_tokens: 800, messages: [{ role: "user", content: prompt }] });
-    const txt = r.content.map(b => b.text || "").join("");
-    return JSON.parse(txt.slice(txt.indexOf("{"), txt.lastIndexOf("}") + 1));
-  } catch { return basic(); }
+  if (!hasAI()) return basic();
+  try { return await aiExtract({ profile, subject: mail.subject || "", from: mail.from?.text || "", text: mail.text || "", pdf: pdfFile ? { name: pdfFile.name, buf: pdfFile.buf, text: pdfText } : null, cats: CATS }); }
+  catch (e) { console.error("aiExtract", e.message); return basic(); }
 }
 
 export default async function handler(req, res) {
@@ -70,7 +57,7 @@ export default async function handler(req, res) {
     const build = async (file) => {
       let pdfText = "";
       if (file) { try { pdfText = (await readPdf(file.buf, 3)).slice(0, 14000); } catch {} }
-      const f = await extract(profile, mail, pdfText);
+      const f = await extract(profile, mail, pdfText, file);
       const all = `${pdfText}\n${mail.text || ""}`;
       const cur = String(f.currency || "EUR").toUpperCase();
       const region = f.region || (EU.test(all) ? "UE" : f.reverse_charge ? "EXT" : "ES");

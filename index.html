@@ -326,7 +326,7 @@ async function boot(session){
   if(error||!ok){booted=false;await sb.auth.signOut();loginView("El email "+esc(S.email)+" no tiene acceso a esta app.");return;}
   S.db=DB;$$("#nav button").forEach(b=>b.disabled=false);$("#acct").hidden=false;$("#who").textContent=S.email;
   render();
-  api("/api/status").then(r=>{S.mailOk=r.imap;S.mailbox=r.mailbox;}).catch(()=>{});
+  api("/api/status").then(r=>{S.mailOk=r.imap;S.mailbox=r.mailbox;S.aiOn=r.ai;}).catch(()=>{});
   COLS.forEach(c=>DB.watch(c,rows=>{if(c==="settings"){S.settings=rows.find(r=>r.id==="profile")||null;applyBrand();}else S[c]=rows;S.loaded[c]=true;render();}));
 }
 sb.auth.onAuthStateChange((ev,session)=>{if(ev==="SIGNED_OUT"){booted=false;S.db=null;loginView();}else if(session)setTimeout(()=>boot(session),0);});
@@ -584,7 +584,10 @@ function openImport(){const L=$("#layer");const st={y:S.y,q:S.q,list:null,verdic
     return `<tr><td style="width:30px">${ok?`<input type="checkbox" data-m="${esc(m.id)}" aria-label="Seleccionar" ${st.sel.has(m.id)?"checked":""} ${s==="done"||st.busy?"disabled":""} style="width:auto">`:""}</td>
      <td class="num small">${fdate(m.date)}</td><td><b>${esc(m.subject||"(sin asunto)")}</b><span class="s">${esc(m.sender)}${v.total?" · "+eur(v.total):""}</span></td>
      <td style="min-width:170px">${ok?fileLabel(m):`<span class="small muted">${esc(v.reason||"")}</span>`}</td>
-     <td class="r" style="white-space:nowrap">${lg?`<span class="pill ${lg.cls}">${esc(lg.msg)}</span>`:ok?(s==="done"?`<span class="pill ok">Ya importada</span>`:s==="complete"?`<span class="pill acc">Añadir PDF</span>`:""):""}</td></tr>`;};
+     <td class="r" style="white-space:nowrap">${lg?`<span class="pill ${lg.cls}">${esc(lg.msg)}</span>`:ok?(s==="done"?`<span class="pill ok">Ya importada</span>`:s==="complete"?`<span class="pill acc">Añadir PDF</span>`:`<button class="btn sm ghost" data-no="${esc(m.id)}" title="Quitar y no volver a mostrar correos de este remitente">No es factura</button>`):`<button class="btn sm" data-yes="${esc(m.id)}">Sí es factura</button>`}</td></tr>`;};
+  const teach=async(m,rule)=>{const v=st.verdict[m.id]||{};const nv=rule==="block"?{...v,ok:false,reason:"Marcado por ti: este remitente no envía facturas"}:{...v,ok:true,reason:"Marcado por ti como factura",files:v.files&&v.files.length?v.files:(m.parts||[]).map(p=>p.name),viaLink:!(m.parts||[]).length};
+    st.verdict[m.id]=nv;if(rule==="block")st.sel.delete(m.id);else st.sel.add(m.id);draw();
+    try{await save("senders",{id:safe(m.addr||"x").slice(0,120)||"x",addr:(m.addr||"").toLowerCase(),rule});await save("mailcheck",{id:m.id,...nv});toast(rule==="block"?"No volveré a mostrarte correos de "+m.addr:"Anotado: "+m.addr+" envía facturas");}catch(e){}};
   const draw=()=>{const g=good(),b=bad();const total=(st.list||[]).length;
    L.innerHTML=`<div class="drawer-bg"><div class="drawer" role="dialog" aria-label="Importar facturas del correo">
    <div class="head"><div><h1>Importar facturas del correo</h1><p class="sub">Reviso uno a uno los correos de ${esc(S.mailbox||"tu buzón")} y solo te muestro las facturas de gastos.</p></div><div class="row"><button class="btn ghost" id="x">Cerrar</button></div></div>
@@ -596,16 +599,17 @@ function openImport(){const L=$("#layer");const st={y:S.y,q:S.q,list:null,verdic
    ${st.list?`<div class="panel"><div class="card-h"><h2>${g.length} factura${g.length!==1?"s":""} de gasto</h2><div class="row"><button class="btn ghost" id="all">Marcar todas</button><button class="btn primary" id="imp" ${st.busy||st.checking||!st.sel.size?"disabled":""}>Importar ${st.sel.size||""}</button></div></div>
      ${g.length?`<div class="tw"><table><tbody>${g.map(m=>row(m,true)).join("")}</tbody></table></div>`:`<div class="empty"><b>${st.checking?"Buscando facturas…":"No hay facturas de gasto en ese trimestre"}</b>${st.checking?"Van apareciendo aquí según las encuentro.":""}</div>`}</div>
     ${b.length?`<div class="panel"><div class="card-h"><h2>${b.length} correo${b.length!==1?"s":""} descartado${b.length!==1?"s":""}</h2><button class="btn ghost" id="tog">${st.showBad?"Ocultar":"Ver por qué"}</button></div>${st.showBad?`<div class="tw"><table><tbody>${b.map(m=>row(m,false)).join("")}</tbody></table></div>`:""}</div>`:""}`:""}
-   <div class="tip">Descarto las facturas que emites tú, presupuestos, contratos, avisos de pago y correos que solo mencionan una factura. De cada factura se guarda el PDF (adjunto o descargado desde su enlace) y se leen los importes; revisa siempre los marcados como «Revisar».</div></div></div>`;bind();};
+   <div class="tip">${S.aiOn?"Claude revisa cada correo y sus PDF (también los escaneados) y descarta":"Descarto"} las facturas que emites tú, presupuestos, contratos, avisos de pago y correos que solo mencionan una factura. Si me equivoco, pulsa «No es factura» o «Sí es factura» y lo recordaré para ese remitente. De cada factura se guarda el PDF (adjunto o descargado desde su enlace) y se leen los importes; revisa siempre los marcados como «Revisar».</div></div></div>`;bind();};
   const bind=()=>{$("#x").onclick=()=>{st.cancel=true;closeLayer();};$("#m_q").onchange=e=>{st.q=+e.target.value;draw();};$("#m_y").onchange=e=>{st.y=+e.target.value||st.y;draw();};$("#go").onclick=search;
    $$("[data-m]",L).forEach(cb=>cb.onchange=()=>{cb.checked?st.sel.add(cb.dataset.m):st.sel.delete(cb.dataset.m);draw();});
+   $$("[data-no]",L).forEach(b=>b.onclick=()=>teach(st.list.find(x=>x.id===b.dataset.no),"block"));$$("[data-yes]",L).forEach(b=>b.onclick=()=>teach(st.list.find(x=>x.id===b.dataset.yes),"allow"));
    const a=$("#all");if(a)a.onclick=()=>{good().forEach(m=>{if(state(m)!=="done")st.sel.add(m.id);});draw();};const i=$("#imp");if(i)i.onclick=run;const t=$("#tog");if(t)t.onclick=()=>{st.showBad=!st.showBad;draw();};};
   async function search(){st.busy=true;st.err="";st.list=null;st.verdict={};st.sel.clear();st.done=0;draw();const [a,b]=range();
     try{const r=await api(`/api/mail/search?from=${a}&to=${b}`);st.list=r.items;if(r.warnings&&r.warnings.length)st.err=r.warnings.join(" ");}
     catch(e){st.err=e.code==="imap_not_configured"?"Falta conectar el correo en Vercel (IMAP_PASSWORD).":e.message;st.busy=false;draw();return;}
     st.busy=false;st.checking=true;draw();
     const groups={};st.list.forEach(m=>{(groups[m.acct||0]=groups[m.acct||0]||[]).push(m);});
-    for(const acct in groups){const arr=groups[acct];for(let k=0;k<arr.length;k+=6){if(st.cancel)return;const batch=arr.slice(k,k+6);
+    for(const acct in groups){const arr=groups[acct];for(let k=0;k<arr.length;k+=4){if(st.cancel)return;const batch=arr.slice(k,k+4);
       try{const r=await api("/api/mail/classify",{method:"POST",body:JSON.stringify({items:batch.map(m=>({id:m.id,folder:m.folder,uid:m.uid,acct:m.acct||0,parts:m.parts||[],subject:m.subject,addr:m.addr}))})});
         Object.assign(st.verdict,r.results);batch.forEach(m=>{if(r.results[m.id]?.ok&&state(m)!=="done")st.sel.add(m.id);});}
       catch(e){batch.forEach(m=>st.verdict[m.id]={ok:false,reason:"No se pudo revisar: "+(e.message||"error")});}
@@ -618,7 +622,7 @@ function openImport(){const L=$("#layer");const st={y:S.y,q:S.q,list:null,verdic
       else if(r.status==="duplicate"){setLog("Ya importada","ok");}
       else if(r.status==="nofile"){fail++;const l=(r.links||[])[0];setLog(l?("No se pudo descargar: "+l.reason):"Sin PDF descargable","bad");}
       else if(r.gated){ok++;st.sel.delete(id);setLog("Registrada · descarga el PDF (pide iniciar sesión)","warn");}
-      else{const n=(r.files||[]).length;ok+=n;st.sel.delete(id);const fromLink=(r.files||[]).some(f=>f.from==="enlace");setLog(n===1?(r.files[0].completed?"PDF añadido al gasto":fromLink?"Factura descargada del enlace":"Factura guardada"):n+" facturas guardadas","ok");}}
+      else{const n=(r.files||[]).length;ok+=n;st.sel.delete(id);if(m.addr)save("senders",{id:safe(m.addr).slice(0,120)||"x",addr:m.addr.toLowerCase(),rule:"allow"}).catch(()=>{});const fromLink=(r.files||[]).some(f=>f.from==="enlace");setLog(n===1?(r.files[0].completed?"PDF añadido al gasto":fromLink?"Factura descargada del enlace":"Factura guardada"):n+" facturas guardadas","ok");}}
      catch(e){fail++;setLog((e.message||"Error").slice(0,60),"bad");}}
     st.busy=false;draw();toast(`${ok} factura${ok!==1?"s":""} guardada${ok!==1?"s":""}${skip?` · ${skip} descartada${skip!==1?"s":""}`:""}${fail?` · ${fail} sin descargar`:""}`);}
   draw();}
