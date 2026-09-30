@@ -311,12 +311,13 @@ function download(filename,data){const blob=data instanceof Blob?data:new Blob([
 async function api(path,opts={}){const {data}=await sb.auth.getSession();const t=data.session?.access_token;const r=await fetch(path,{...opts,headers:{"Content-Type":"application/json",...(opts.headers||{}),Authorization:"Bearer "+t}});let j={};try{j=await r.json();}catch(e){}if(!r.ok)throw {status:r.status,code:j.code,message:j.error||("Error "+r.status)};return j;}
 
 /* ---------- acceso ---------- */
-function loginView(msg){$("#main").innerHTML=`<div class="login panel"><h1>Entrar</h1><p class="sub">Te enviamos un enlace de acceso a tu email. Solo los emails autorizados pueden ver los datos.</p>
-  <form id="lf" class="row" style="margin-top:14px"><input id="l_mail" type="email" required autocomplete="email" placeholder="tu@email.com" style="flex:1;min-width:200px"><button class="btn primary" id="l_go">Enviar enlace</button></form>
+function loginView(msg){$("#main").innerHTML=`<div class="login panel"><h1>Entrar</h1><p class="sub">Accede con tu email y contraseña.</p>
+  <form id="lf" style="margin-top:14px;display:flex;flex-direction:column;gap:10px"><label for="l_mail">Email</label><input id="l_mail" type="email" required autocomplete="username">
+  <label for="l_pw">Contraseña</label><input id="l_pw" type="password" required autocomplete="current-password"><button class="btn primary" id="l_go" style="justify-content:center">Entrar</button></form>
   <p class="small muted" id="l_msg" style="margin:12px 0 0">${msg||""}</p></div>`;
   $$("#nav button").forEach(b=>b.disabled=true);const ac=$("#acct");if(ac)ac.hidden=true;
-  $("#lf").onsubmit=async e=>{e.preventDefault();const b=$("#l_go");b.disabled=true;const {error}=await sb.auth.signInWithOtp({email:$("#l_mail").value.trim(),options:{emailRedirectTo:location.origin}});
-    $("#l_msg").textContent=error?("No se pudo enviar: "+error.message):"Listo. Abre el enlace que te acabamos de enviar desde este mismo navegador.";b.disabled=false;};}
+  $("#lf").onsubmit=async e=>{e.preventDefault();const b=$("#l_go");b.disabled=true;$("#l_msg").textContent="";const {error}=await sb.auth.signInWithPassword({email:$("#l_mail").value.trim(),password:$("#l_pw").value});
+    if(error)$("#l_msg").textContent=/invalid/i.test(error.message)?"Email o contraseña incorrectos.":"No se pudo entrar: "+error.message;b.disabled=false;};}
 let booted=false;
 async function boot(session){
   if(!session){booted=false;S.db=null;loginView();return;}
@@ -713,10 +714,12 @@ VIEWS.ajustes={html(){const s=S.settings||{};const F=(id,l,v,w="w6",ph="")=>`<di
    <div class="f w6"><label for="s_logo">Logo (PNG o JPG, fondo claro)</label><input id="s_logo" type="file" accept="image/png,image/jpeg">${s.logo?`<div class="row" style="margin-top:8px"><img src="${s.logo}" alt="Logo actual" style="max-height:40px;background:#fff;padding:4px;border-radius:6px"><button class="btn sm ghost" id="s_nologo">Quitar</button></div>`:""}</div>
    <div class="f w3"><label for="s_acc">Color de marca</label><input id="s_acc" type="color" class="swatch" value="${esc(s.accent||"#2F5BFF")}"></div>
   </fieldset></div>
+  <div class="panel pad" style="margin-top:16px"><h2 style="margin-bottom:12px">Contraseña de acceso</h2><fieldset><div class="f w6"><label for="s_pw1">Nueva contraseña</label><input id="s_pw1" type="password" autocomplete="new-password"></div><div class="f w6"><label for="s_pw2">Repítela</label><input id="s_pw2" type="password" autocomplete="new-password"></div></fieldset><div style="margin-top:12px"><button class="btn" id="s_pwgo">Cambiar contraseña</button></div></div>
   <p class="tip" style="margin-top:16px">Desde el 1 de julio de 2027 los autónomos deberán facturar con un programa adaptado a VeriFactu. Esta app te sirve para llevar tus cuentas y preparar la documentación para tu gestor, pero no envía registros a Hacienda.</p>`;},
  bind(m){let logo=(S.settings||{}).logo||"";
   $("#s_logo",m).onchange=e=>{const f=e.target.files[0];if(!f)return;if(f.size>600000){toast("El logo debe ocupar menos de 600 KB.");return;}const r=new FileReader();r.onload=()=>{const img=new Image();img.onload=()=>{const sc=Math.min(1,480/img.width);const c=document.createElement("canvas");c.width=img.width*sc;c.height=img.height*sc;const x=c.getContext("2d");x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.drawImage(img,0,0,c.width,c.height);logo=c.toDataURL("image/png");toast("Logo listo: pulsa Guardar ajustes");};img.src=r.result;};r.readAsDataURL(f);};
   const nl=$("#s_nologo",m);if(nl)nl.onclick=()=>{logo="";toast("Logo quitado: pulsa Guardar ajustes");};
+  $("#s_pwgo",m).onclick=async()=>{const a=$("#s_pw1",m).value,b=$("#s_pw2",m).value;if(a.length<10){toast("Usa al menos 10 caracteres.");return;}if(a!==b){toast("Las contraseñas no coinciden.");return;}const {error}=await sb.auth.updateUser({password:a});toast(error?"No se pudo cambiar: "+error.message:"Contraseña cambiada");if(!error){$("#s_pw1",m).value="";$("#s_pw2",m).value="";}};
   $("#save",m).onclick=async()=>{const v=id=>$("#"+id,m).value.trim();const body={...(S.settings||{}),id:"profile",name:v("s_name"),nif:v("s_nif").toUpperCase(),brandName:v("s_brand"),email:v("s_mail"),address:v("s_addr"),city:v("s_city"),phone:v("s_phone"),web:v("s_web"),iban:v("s_iban").replace(/\s/g,"").toUpperCase(),
     seriesF:v("s_sf"),seriesR:v("s_sr"),seriesP:v("s_sp"),irpfDefault:+v("s_irpf"),footer:v("s_foot"),dificilJustificacion:$("#s_dj",m).checked,logo,accent:$("#s_acc",m).value};
    try{await save("settings",body);toast("Ajustes guardados");}catch(e){toast(errMsg(e));}};}};
