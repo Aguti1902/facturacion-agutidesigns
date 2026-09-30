@@ -1,0 +1,13 @@
+{
+  "name": "agutidesigns-gestion",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "22.x" },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.65.0",
+    "@supabase/supabase-js": "^2.57.4",
+    "imapflow": "^1.0.195",
+    "mailparser": "^3.7.4",
+    "pdf-parse": "1.1.1"
+  }
+}

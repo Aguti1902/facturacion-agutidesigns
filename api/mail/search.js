@@ -1,0 +1,57 @@
+import { send, authUser, withImap, folders } from "../../lib/common.js";
+import crypto from "node:crypto";
+
+const KEYWORDS = /(factura|invoice|recibo|receipt|billing|facturaci[oó]n|payment|pago|justificante|statement)/i;
+
+function hasPdf(node) {
+  if (!node) return false;
+  const type = `${node.type || ""}`.toLowerCase();
+  const name = `${node.dispositionParameters?.filename || node.parameters?.name || ""}`.toLowerCase();
+  if (type === "application/pdf" || name.endsWith(".pdf")) return true;
+  return (node.childNodes || []).some(hasPdf);
+}
+
+export default async function handler(req, res) {
+  try {
+    await authUser(req);
+    const url = new URL(req.url, "http://x");
+    const from = url.searchParams.get("from"); // AAAA-MM-DD
+    const to = url.searchParams.get("to");     // AAAA-MM-DD (exclusivo)
+    const all = url.searchParams.get("all") === "1";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from || "") || !/^\d{4}-\d{2}-\d{2}$/.test(to || "")) return send(res, 400, { error: "Fechas no válidas" });
+    const own = (process.env.IMAP_USER || "").toLowerCase();
+    const items = await withImap(async client => {
+      const out = [];
+      for (const folder of folders()) {
+        let lock;
+        try { lock = await client.getMailboxLock(folder); } catch { continue; }
+        try {
+          const uids = await client.search({ since: new Date(from + "T00:00:00Z"), before: new Date(to + "T00:00:00Z") }, { uid: true });
+          if (!uids || !uids.length) continue;
+          for await (const m of client.fetch(uids.slice(-400), { envelope: true, bodyStructure: true, internalDate: true }, { uid: true })) {
+            const env = m.envelope || {};
+            const sender = (env.from && env.from[0]) || {};
+            const addr = (sender.address || "").toLowerCase();
+            if (own && addr === own) continue;
+            const pdf = hasPdf(m.bodyStructure);
+            const subject = env.subject || "";
+            if (!all && !pdf && !KEYWORDS.test(subject)) continue;
+            const key = env.messageId || `${folder}:${client.mailbox.uidValidity}:${m.uid}`;
+            out.push({
+              id: "imap-" + crypto.createHash("sha1").update(key).digest("hex").slice(0, 20),
+              folder, uid: m.uid,
+              date: (env.date || m.internalDate || new Date()).toISOString(),
+              sender: sender.name ? `${sender.name} <${addr}>` : addr, addr,
+              subject, hasPdf: pdf,
+            });
+          }
+        } finally { lock.release(); }
+      }
+      return out;
+    });
+    items.sort((a, b) => b.date.localeCompare(a.date));
+    send(res, 200, { items });
+  } catch (e) {
+    send(res, e.status || 500, { error: e.message || "Error", code: e.code });
+  }
+}
