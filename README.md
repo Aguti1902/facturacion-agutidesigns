@@ -6,4 +6,4 @@ Facturación y contabilidad de autónomo (Alejandro Gutiérrez Gómez): facturas
 - Importar gastos del correo: `api/mail/*` por IMAP de Gmail.
 
 ## Variables en Vercel
-SUPABASE_URL, SUPABASE_ANON_KEY, IMAP_HOST=imap.gmail.com, IMAP_PORT=993, IMAP_USER=info@agutidesigns.io, IMAP_PASSWORD (contraseña de aplicación de Google, Sensitive), IMAP_FOLDERS=INBOX. Opcional: ANTHROPIC_API_KEY.
+SUPABASE_URL, SUPABASE_ANON_KEY, IMAP_HOST=imap.gmail.com, IMAP_PORT=993, IMAP_USER=agutierrezgomez00@gmail.com, IMAP_PASSWORD (contraseña de aplicación de Google, Sensitive), IMAP_FOLDERS=INBOX. Opcional: ANTHROPIC_API_KEY.
